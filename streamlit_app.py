@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import boto3
 import duckdb as db
@@ -6,31 +7,39 @@ import pandas as pd
 import awswrangler as wr
 import streamlit as st
 from dotenv import load_dotenv
-from utils.constants import config_vars
+from helpers.constants import config_vars
 
 load_dotenv()
 
-# st.write("Hello world!")
+st.write("Using DuckDB to query csv files from S3")
 
-session = boto3.Session(aws_access_key_id=os.environ["aws_access_key_id_me"],\
-                        aws_secret_access_key=os.environ["aws_secret_access_key_me"])
+session = boto3.Session(aws_access_key_id=config_vars.get("AWS_ACCESS_KEY_ID"),\
+                        aws_secret_access_key=config_vars.get("AWS_SECRET_ACCESS_KEY"))
 
-duckdb_connection = db.connect(database=":memory:", read_only=False)
+lambda_client = session.client('lambda', region_name='us-east-1')
 
-start = time.time()
+if st.button("Get Data Analysis"):
+    response = lambda_client.invoke(
+        FunctionName=config_vars.get("LAMBDA_FUNCTION_NAME"),
+        Payload='{}'
+    )
+    payload = response['Payload'].read()
 
-df = wr.s3.read_parquet(f"s3://{config_vars.get('BUCKET_NAME')}/cryptos_prices/", 
-                        dataset=True, 
-                        use_threads=True,
-                        boto3_session=session)
+    st.write(f"Payload: {payload}")
 
-end = time.time()
-print(f"read parquet ok - {end - start}")
+str_payload = payload.decode("utf-8")
 
-duckdb_connection.query("CREATE TABLE cryptos_prices AS SELECT * FROM df")
+s3_path = json.loads( str_payload ).get("body").get("output_path")
 
-print("query parquet ok")
+st.write(f"Path: {s3_path}")
 
-duckdb_connection.table("cryptos_prices").show()
+df = wr.s3.read_parquet(path=s3_path, dataset=True, boto3_session=session)
 
-# st.line_chart(df, x="symbol", y="prices")
+# df["index"] = df["anio"]
+# df.set_index("index", inplace=True)
+
+# #df.rename(columns={'anio':'index'}).set_index('index')
+
+# st.bar_chart(df,x='city',y='count_visits', color='anio')
+
+st.line_chart(df, x='anio', y='count_visits', color='city')
